@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 import OpenAI from "openai";
 import ExcelJS from "exceljs";
 import multer from "multer";
+import XLSX from "xlsx";
 
 dotenv.config();
 
@@ -22,9 +23,25 @@ app.post("/generate", upload.single("file"), async (req, res) => {
     const message = req.body.message || "";
     let fileContent = "";
 
-    // 🔹 Read uploaded file
+    // 🔹 Handle file upload
     if (req.file) {
-      fileContent = req.file.buffer.toString("utf-8");
+      const fileName = req.file.originalname;
+
+      // ✅ If Excel file
+      if (fileName.endsWith(".xlsx")) {
+        const workbook = XLSX.read(req.file.buffer, { type: "buffer" });
+        const sheetName = workbook.SheetNames[0];
+        const sheet = workbook.Sheets[sheetName];
+
+        const jsonData = XLSX.utils.sheet_to_json(sheet);
+
+        fileContent = JSON.stringify(jsonData, null, 2);
+      }
+
+      // ✅ If CSV or text
+      else {
+        fileContent = req.file.buffer.toString("utf-8");
+      }
     }
 
     const prompt = `
@@ -33,11 +50,16 @@ You are a shift roster assistant.
 User request:
 ${message}
 
-Uploaded file content:
+Uploaded data:
 ${fileContent}
 
-If user asks for Excel or download:
-Return ONLY JSON in this format:
+Instructions:
+- Use uploaded data if provided
+- Generate fair and balanced schedules
+- Avoid overlapping shifts for same employee
+
+If user asks for Excel:
+Return ONLY JSON:
 {
   "roster": [
     {"employee": "John", "day": "Monday", "shift": "9AM-5PM"}
@@ -49,9 +71,7 @@ Otherwise return formatted text.
 
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      messages: [
-        { role: "user", content: prompt }
-      ]
+      messages: [{ role: "user", content: prompt }]
     });
 
     const aiText = response.choices[0].message.content;
@@ -64,7 +84,7 @@ Otherwise return formatted text.
       data = null;
     }
 
-    // 🔥 Excel generation
+    // 🔥 Excel output
     if (data && data.roster) {
       const workbook = new ExcelJS.Workbook();
       const sheet = workbook.addWorksheet("Roster");
