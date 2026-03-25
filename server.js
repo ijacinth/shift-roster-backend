@@ -3,6 +3,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import OpenAI from "openai";
 import ExcelJS from "exceljs";
+import multer from "multer";
 
 dotenv.config();
 
@@ -10,38 +11,46 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+const upload = multer();
+
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
 
-app.post("/generate", async (req, res) => {
+app.post("/generate", upload.single("file"), async (req, res) => {
   try {
-    const { message } = req.body;
+    const message = req.body.message || "";
+    let fileContent = "";
 
-    const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      messages: [
-        {
-          role: "system",
-          content: `
+    // 🔹 Read uploaded file
+    if (req.file) {
+      fileContent = req.file.buffer.toString("utf-8");
+    }
+
+    const prompt = `
 You are a shift roster assistant.
 
-If the user asks for Excel or download:
-Return ONLY JSON in this format:
+User request:
+${message}
 
+Uploaded file content:
+${fileContent}
+
+If user asks for Excel or download:
+Return ONLY JSON in this format:
 {
   "roster": [
     {"employee": "John", "day": "Monday", "shift": "9AM-5PM"}
   ]
 }
 
-Otherwise return a formatted text response.
-`
-        },
-        {
-          role: "user",
-          content: message
-        }
+Otherwise return formatted text.
+`;
+
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages: [
+        { role: "user", content: prompt }
       ]
     });
 
@@ -82,7 +91,6 @@ Otherwise return a formatted text response.
       return res.send(buffer);
     }
 
-    // Normal text response
     res.json({ output: aiText });
 
   } catch (error) {
